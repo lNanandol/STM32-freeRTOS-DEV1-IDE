@@ -27,6 +27,7 @@
 #include "portmacro.h"
 #include "stm32f411xe.h"
 #include "task.h"
+#include "SEGGER_SYSVIEW.h"
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -56,7 +57,7 @@ const osThreadAttr_t defaultTask_attributes = {
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* USER CODE BEGIN PV */
-
+#define DWT_CTRL (*(volatile uint32_t*)0xE0001000) // DWT_CYCCNT Registro
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -66,8 +67,8 @@ static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-static void task1_handler(void *params);
-static void task2_handler(void *params);
+static void task1_handler(void *pvParams);
+static void task2_handler(void *pvParams);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -83,10 +84,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  TaskHandle_t task1_handle = NULL;
-  TaskHandle_t task2_handle = NULL;
 
-  BaseType_t status;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -109,27 +107,6 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-  status = xTaskCreate(
-    task1_handler,
-    "Task_1",
-    200,
-    "Hello from Task 1",
-    2,
-    &task1_handle
-  );
-
-  configASSERT(status == pdPASS);
-
-  status = xTaskCreate(
-    task2_handler,
-    "Task_2",
-    200,
-    "Hello from Task 2",
-    2,
-    &task2_handle
-  );
-
-  configASSERT(status = pdPASS);
 
   // Iniciar el scheduler de freeRTOS
   vTaskStartScheduler();
@@ -163,6 +140,24 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
+
+  // Enable Cycle Counter
+  DWT_CTRL |= (1<<0);
+
+  SEGGER_SYSVIEW_Conf();
+  SEGGER_SYSVIEW_Start();
+
+  // Tarea para mandar mensaje 1
+  if((xTaskCreate(task1_handler, "Task_1", configMINIMAL_STACK_SIZE, "Hola desde tarea 1", 2, NULL)) != pdTRUE)
+  {
+
+  };
+
+  // Tarea para mandar mensaje 2
+  if((xTaskCreate(task2_handler, "Task_2", configMINIMAL_STACK_SIZE, "Hola desde tarea 2", 2, NULL)) != pdTRUE)
+  {
+
+  };
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -299,28 +294,21 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-int _write(int file, char *ptr, int len) {
-    for (int i = 0; i < len; i++) {
-        ITM_SendChar((*ptr++));
-    }
-    return len;
-}
-
-static void task1_handler(void *params)
+static void task1_handler(void *pvParams)
 {
   for (;;)
   {
-    printf("%s\n", (char*)params);
-    taskYIELD();
+    printf("%s\n", (char*)pvParams);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 };
 
-static void task2_handler(void *params)
+static void task2_handler(void *pvParams)
 {
   for (;;)
   {
-    printf("%s\n", (char*)params);
-    taskYIELD();
+    printf("%s\n", (char*)pvParams);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
 };
 /* USER CODE END 4 */
