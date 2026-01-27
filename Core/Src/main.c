@@ -24,11 +24,15 @@
 /* USER CODE BEGIN Includes */
 #include "FreeRTOS.h"
 #include "FreeRTOSConfig.h"
+#include "queue.h"
 #include "portmacro.h"
 #include "stm32f411xe.h"
 #include "task.h"
 #include "SEGGER_SYSVIEW.h"
+
 #include <stdio.h>
+#include <string.h>
+#include <stdint.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,6 +62,8 @@ const osThreadAttr_t defaultTask_attributes = {
 };
 /* USER CODE BEGIN PV */
 #define DWT_CTRL (*(volatile uint32_t*)0xE0001000) // DWT_CYCCNT Registro
+QueueHandle_t xQueue;
+static const char *msg = NULL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -67,8 +73,10 @@ static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-static void task1_handler(void *pvParams);
-static void task2_handler(void *pvParams);
+static void vTaskMSG_1(void *pvParams);
+static void vTaskMSG_2(void *pvParams);
+static void vTaskSendQueue(void *pvParams);
+static void vTaskReceiveQueue(void *pvParams);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -108,11 +116,6 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  // Iniciar el scheduler de freeRTOS
-  vTaskStartScheduler();
-  // Si el scheduler se inicia correctamente, el código no debería llegar aquí
-  // Un error seria en el caso de que no haya suficiente memoria en el heap
-
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -132,11 +135,17 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  // Crear una Queue de 10 elementos de 32 bits
+  if((xQueue = xQueueCreate(10, sizeof(uint32_t))) == NULL)
+  {
+	  msg = "Error durante la creacion de Queue";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
   /* creation of defaultTask */
-  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+  //defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -147,17 +156,34 @@ int main(void)
   SEGGER_SYSVIEW_Conf();
   SEGGER_SYSVIEW_Start();
 
-  // Tarea para mandar mensaje 1
-  if((xTaskCreate(task1_handler, "Task_1", configMINIMAL_STACK_SIZE, "Hola desde tarea 1", 2, NULL)) != pdTRUE)
+  // Mensaje de Error Tarea 1
+  if((xTaskCreate(vTaskMSG_1, "Task MSG 1", configMINIMAL_STACK_SIZE, "Hola desde tarea 1", 1, NULL)) != pdTRUE)
   {
+	  msg = "Error durante la creacion de Task 1";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }
 
-  };
-
-  // Tarea para mandar mensaje 2
-  if((xTaskCreate(task2_handler, "Task_2", configMINIMAL_STACK_SIZE, "Hola desde tarea 2", 2, NULL)) != pdTRUE)
+  // Mensaje de Error Tarea 2
+  if((xTaskCreate(vTaskMSG_2, "Task MSG 2", configMINIMAL_STACK_SIZE, "Hola desde tarea 2", 1, NULL)) != pdTRUE)
   {
+	  msg = "Error durante la creacion de Task 2";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }
 
-  };
+  // Mensaje de Error Tarea SendQueue
+  if((xTaskCreate(vTaskSendQueue, "TaskSendQueue", configMINIMAL_STACK_SIZE, NULL, 1, NULL)) != pdTRUE)
+  {
+	  msg = "Error durante la creacion de vTaskSendQueue";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }
+
+  // Mensaje de Error Tarea ReceiveQueue
+  if((xTaskCreate(vTaskReceiveQueue, "TaskReceiveQueue", configMINIMAL_STACK_SIZE, NULL, 1, NULL)) != pdTRUE)
+  {
+	  msg = "Error durante la creacion de vTaskReceiveQueue";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }
+
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -294,23 +320,76 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-static void task1_handler(void *pvParams)
+static void vTaskMSG_1(void *pvParams)
 {
   for (;;)
   {
     printf("%s\n", (char*)pvParams);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
-};
+  vTaskDelete(NULL);
+}
 
-static void task2_handler(void *pvParams)
+static void vTaskMSG_2(void *pvParams)
 {
   for (;;)
   {
     printf("%s\n", (char*)pvParams);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
-};
+  vTaskDelete(NULL);
+}
+
+static void vTaskSendQueue(void *pvParams)
+{
+  // Declaracion de variables
+  uint32_t counterSend = 0;
+  char txBuffer[50];
+  int len;
+
+  for (;;)
+  {
+	counterSend++;
+	// Si Queue esta lleno, espera a que se libere espacio
+	if((xQueueSend(xQueue, &counterSend, portMAX_DELAY)) == pdPASS)
+	{
+		len = sprintf(txBuffer, "Queue Send, value: %lu\r\n", counterSend);
+		//taskENTER_CRITICAL();
+		vTaskSuspendAll();
+		HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 1000);
+		//taskEXIT_CRITICAL();
+		xTaskResumeAll();
+	}
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+  vTaskDelete(NULL);
+}
+
+static void vTaskReceiveQueue(void *pvParams)
+{
+  // Declaracion de variables
+  uint32_t counterReceive = 0;
+  char txBuffer[50];
+  int len;
+
+  for (;;)
+  {
+	counterReceive++;
+	// Espera a que el Queue reciva algun valor
+	if((xQueueReceive(xQueue, &counterReceive, portMAX_DELAY)) == pdPASS)
+	{
+		len = sprintf(txBuffer, "Queue Receive, value: %lu\r\n", counterReceive);
+		//taskENTER_CRITICAL();
+		vTaskSuspendAll();
+		HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 1000);
+		//taskEXIT_CRITICAL();
+		xTaskResumeAll();
+	}
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+  vTaskDelete(NULL);
+}
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
