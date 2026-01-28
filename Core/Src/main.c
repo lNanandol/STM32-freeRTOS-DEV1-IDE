@@ -37,7 +37,11 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+struct AInfo
+{
+	uint8_t sizeString;
+	uint8_t dataString[255];
+};
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -52,6 +56,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart2;
+DMA_HandleTypeDef hdma_usart2_rx;
 
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -63,20 +68,26 @@ const osThreadAttr_t defaultTask_attributes = {
 /* USER CODE BEGIN PV */
 #define DWT_CTRL (*(volatile uint32_t*)0xE0001000) // DWT_CYCCNT Registro
 QueueHandle_t xQueue;
+QueueHandle_t xQueueUART;
+QueueHandle_t xQueueUARTDMA;
+uint8_t g_bufferRX[255];
 static const char *msg = NULL;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-static void vTaskMSG_1(void *pvParams);
+static void vTask_LED1(void *pvParams);
 static void vTaskMSG_2(void *pvParams);
 static void vTaskSendQueue(void *pvParams);
 static void vTaskReceiveQueue(void *pvParams);
+static void vTaskReceiveQueueUART(void *pvParams);
+static void vTaskReceiveQueueUARTDMA(void *pvParams);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -113,9 +124,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_UART_Receive_DMA(&huart2, (uint8_t*)g_bufferRX, 255); // Guardar los datos recibidos en un arreglo buffer
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -138,7 +150,21 @@ int main(void)
   // Crear una Queue de 10 elementos de 32 bits
   if((xQueue = xQueueCreate(10, sizeof(uint32_t))) == NULL)
   {
-	  msg = "Error durante la creacion de Queue";
+	  msg = "Error durante la creacion de Queue\r\n";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }
+
+  // Crear una Queue de 50 elementos de 8 bits
+/*  if((xQueueUART = xQueueCreate(50, sizeof(uint8_t))) == NULL)
+  {
+	  msg = "Error durante la creacion de QueueUART\r\n";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }*/
+
+  // Crear una Queue de 5 elementos de 32 bits unsigned
+  if((xQueueUARTDMA = xQueueCreate(5, sizeof(struct AInfo *))) == NULL)
+  {
+	  msg = "Error durante la creacion de QueueUARTDMA\r\n";
 	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
   }
   /* USER CODE END RTOS_QUEUES */
@@ -156,31 +182,45 @@ int main(void)
   SEGGER_SYSVIEW_Conf();
   SEGGER_SYSVIEW_Start();
 
-  // Mensaje de Error Tarea 1
-  if((xTaskCreate(vTaskMSG_1, "Task MSG 1", configMINIMAL_STACK_SIZE, "Hola desde tarea 1", 1, NULL)) != pdTRUE)
+  // Crear Tarea 1
+  if((xTaskCreate(vTask_LED1, "Task LED 1", configMINIMAL_STACK_SIZE, NULL, 1, NULL)) != pdTRUE)
   {
-	  msg = "Error durante la creacion de Task 1";
+	  msg = "Error durante la creacion de Task 1\r\n";
 	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
   }
 
-  // Mensaje de Error Tarea 2
-  if((xTaskCreate(vTaskMSG_2, "Task MSG 2", configMINIMAL_STACK_SIZE, "Hola desde tarea 2", 1, NULL)) != pdTRUE)
+  // Crear Tarea 2
+  if((xTaskCreate(vTaskMSG_2, "Task MSG 2", configMINIMAL_STACK_SIZE, NULL, 1, NULL)) != pdTRUE)
   {
-	  msg = "Error durante la creacion de Task 2";
+	  msg = "Error durante la creacion de Task 2\r\n";
 	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
   }
 
-  // Mensaje de Error Tarea SendQueue
+/*  // Crear Tarea SendQueue
   if((xTaskCreate(vTaskSendQueue, "TaskSendQueue", configMINIMAL_STACK_SIZE, NULL, 1, NULL)) != pdTRUE)
   {
-	  msg = "Error durante la creacion de vTaskSendQueue";
+	  msg = "Error durante la creacion de vTaskSendQueue\r\n";
 	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
   }
 
-  // Mensaje de Error Tarea ReceiveQueue
+  // Crear Tarea ReceiveQueue
   if((xTaskCreate(vTaskReceiveQueue, "TaskReceiveQueue", configMINIMAL_STACK_SIZE, NULL, 1, NULL)) != pdTRUE)
   {
-	  msg = "Error durante la creacion de vTaskReceiveQueue";
+	  msg = "Error durante la creacion de vTaskReceiveQueue\r\n";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }
+
+  // Crear Tarea ReceiveQueueUART
+  if((xTaskCreate(vTaskReceiveQueueUART, "TaskReceiveQueueUART", configMINIMAL_STACK_SIZE, NULL, 2, NULL)) != pdTRUE)
+  {
+	  msg = "Error durante la creacion de vTaskReceiveQueueUART\r\n";
+	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
+  }*/
+
+  // Crear Tarea ReceiveQueueUARTDMA
+  if((xTaskCreate(vTaskReceiveQueueUARTDMA, "TaskReceiveQueueUARTDMA", configMINIMAL_STACK_SIZE * 2, NULL, 1, NULL)) != pdTRUE)
+  {
+	  msg = "Error durante la creacion de vTaskReceiveQueueUARTDMA\r\n";
 	  HAL_UART_Transmit(&huart2, (uint8_t*)msg, strlen(msg), 1000);
   }
 
@@ -275,8 +315,25 @@ static void MX_USART2_UART_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN USART2_Init 2 */
-
+  //__HAL_UART_ENABLE_IT(&huart2, UART_IT_RXNE);
+  __HAL_UART_ENABLE_IT(&huart2, UART_IT_IDLE); // Habilita la interrupcion del puerto serial en idle
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
 
 }
 
@@ -320,11 +377,11 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-static void vTaskMSG_1(void *pvParams)
+static void vTask_LED1(void *pvParams)
 {
   for (;;)
   {
-    printf("%s\n", (char*)pvParams);
+	HAL_GPIO_TogglePin(GPIOA, LD2_Pin);
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
@@ -351,16 +408,20 @@ static void vTaskSendQueue(void *pvParams)
   {
 	counterSend++;
 	// Si Queue esta lleno, espera a que se libere espacio
-	if((xQueueSend(xQueue, &counterSend, portMAX_DELAY)) == pdPASS)
+	if((xQueueSend(xQueue, &counterSend, pdMS_TO_TICKS(10))) == pdPASS)
 	{
 		len = sprintf(txBuffer, "Queue Send, value: %lu\r\n", counterSend);
-		//taskENTER_CRITICAL();
-		vTaskSuspendAll();
-		HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 1000);
-		//taskEXIT_CRITICAL();
-		xTaskResumeAll();
 	}
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+	else
+	{
+		len = sprintf(txBuffer, "Queue is full!\r\n");
+	}
+	//taskENTER_CRITICAL();
+	vTaskSuspendAll();
+	HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 1000);
+	//taskEXIT_CRITICAL();
+	xTaskResumeAll();
+    vTaskDelay(100 / portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
 }
@@ -374,9 +435,8 @@ static void vTaskReceiveQueue(void *pvParams)
 
   for (;;)
   {
-	counterReceive++;
 	// Espera a que el Queue reciva algun valor
-	if((xQueueReceive(xQueue, &counterReceive, portMAX_DELAY)) == pdPASS)
+	if((xQueueReceive(xQueue, &counterReceive, pdMS_TO_TICKS(10))) == pdPASS)
 	{
 		len = sprintf(txBuffer, "Queue Receive, value: %lu\r\n", counterReceive);
 		//taskENTER_CRITICAL();
@@ -384,12 +444,109 @@ static void vTaskReceiveQueue(void *pvParams)
 		HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 1000);
 		//taskEXIT_CRITICAL();
 		xTaskResumeAll();
+	    //vTaskDelay(1000 / portTICK_PERIOD_MS);
 	}
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
   vTaskDelete(NULL);
 }
 
+static void vTaskReceiveQueueUART(void *pvParams)
+{
+  // Declaracion de variables
+  uint8_t txData;
+
+  for (;;)
+  {
+	// Espera a que el Queue reciva algun valor
+	if((xQueueReceive(xQueueUART, &txData, portMAX_DELAY)) == pdPASS)
+	{
+		//taskENTER_CRITICAL();
+		vTaskSuspendAll();
+		HAL_UART_Transmit(&huart2, &txData, 1, 1000);
+		//taskEXIT_CRITICAL();
+		xTaskResumeAll();
+	}
+    //vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+  vTaskDelete(NULL);
+}
+
+static void vTaskReceiveQueueUARTDMA(void *pvParams)
+{
+  // Declaracion de variables
+  struct AInfo  * pxInfoTx;
+
+  for (;;)
+  {
+	// Espera a que el Queue reciva algun valor
+	if((xQueueReceive(xQueueUARTDMA, &pxInfoTx, portMAX_DELAY)) == pdPASS)
+	{
+		//taskENTER_CRITICAL();
+		vTaskSuspendAll();
+		HAL_UART_Transmit(&huart2, pxInfoTx->dataString, pxInfoTx->sizeString, 1000);
+		//taskEXIT_CRITICAL();
+		xTaskResumeAll();
+	}
+    //vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+  vTaskDelete(NULL);
+}
+
+/* Interrupcion UART RX
+ * void USART_UserInt(UART_HandleTypeDef* huart)
+{
+	uint8_t rxChar;
+	static portBASE_TYPE xHigherPriorityTaskWoken;
+
+	xHigherPriorityTaskWoken = pdFALSE;
+
+	HAL_UART_Receive(&huart2, &rxChar, 1, 10);
+
+	xQueueSendFromISR(xQueueUART, &rxChar, &xHigherPriorityTaskWoken);
+
+	// Colocar el token al final del ISR
+	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}*/
+
+void USART_UserInt(UART_HandleTypeDef* huart)
+{
+    // Variable para indicar si se requiere un cambio de contexto
+    static portBASE_TYPE xHigherPriorityTaskWoken;
+
+    struct AInfo xInfoRx; // Estructura local para almacenar la trama recibida
+    struct AInfo * pxInfoRx = &xInfoRx; // Puntero a la estructura para manipulación
+    uint8_t dataLenght;
+
+    xHigherPriorityTaskWoken = pdFALSE; // Inicialmente no hay cambio de contexto
+
+    if(USART2 == huart2.Instance)
+    {
+        // Detectar si la línea entró en estado IDLE
+        if(__HAL_UART_GET_FLAG(&huart2, UART_FLAG_IDLE) != RESET)
+        {
+            __HAL_UART_CLEAR_IDLEFLAG(&huart2); // Obligatorio: Limpiar bandera para evitar re-entrada
+
+            HAL_UART_DMAStop(&huart2); // Detener DMA para calcular bytes recibidos de forma estática
+
+            // Cálculo de bytes: Tamaño total (255) menos lo que le faltó al DMA por llenar
+            dataLenght = 255 - __HAL_DMA_GET_COUNTER(&hdma_usart2_rx);
+
+            if(dataLenght > MAX_STRING_SIZE) dataLenght = MAX_STRING_SIZE;
+
+            xInfoRx.sizeString = dataLenght;
+            memcpy(xInfoRx.dataString, g_bufferRX, dataLenght); // Copiar datos del buffer circular del DMA
+
+            // Enviar la estructura por COPIA a la cola (Seguro para variables locales)
+            xQueueSendFromISR(xQueueUARTDMA, &xInfoRx, &xHigherPriorityTaskWoken);
+
+            // Reiniciar el DMA para la siguiente trama
+            HAL_UART_Receive_DMA(&huart2, (uint8_t*)g_bufferRX, 255);
+        }
+    }
+
+    // Si xHigherPriorityTaskWoken es pdTRUE, fuerza un cambio de contexto inmediato
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */

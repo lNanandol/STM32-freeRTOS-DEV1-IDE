@@ -53,7 +53,7 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+void USART_UserInt(UART_HandleTypeDef* huart);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
